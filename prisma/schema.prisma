@@ -1,0 +1,1382 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access control
+// ---------------------------------------------------------------------------
+
+model User {
+  id                String    @id @default(cuid()) @db.NVarChar(30)
+  employeeCode      String?   @db.NVarChar(30)
+  fullName          String    @db.NVarChar(150)
+  email             String    @db.NVarChar(180)
+  phone             String?   @db.NVarChar(30)
+  passwordHash      String    @db.NVarChar(255)
+  status            String    @default("ACTIVE") @db.NVarChar(30)
+  isSystemAccount   Boolean   @default(false)
+  lastLoginAt       DateTime? @db.DateTime2
+  failedAttempts    Int       @default(0)
+  lockedUntil       DateTime? @db.DateTime2
+  passwordChangedAt DateTime? @db.DateTime2
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  roles         UserRole[]
+  sessions      Session[]
+  resetTokens   PasswordResetToken[]
+  auditLogs     AuditLog[]
+  loginAttempts LoginAttempt[]
+
+  @@unique([email], map: "UQ_Users_Email")
+  @@unique([employeeCode], map: "UQ_Users_EmployeeCode")
+  @@index([status], map: "IX_Users_Status")
+  @@index([deletedAt], map: "IX_Users_DeletedAt")
+  @@map("Users")
+}
+
+model Role {
+  id          String  @id @default(cuid()) @db.NVarChar(30)
+  code        String  @db.NVarChar(50)
+  name        String  @db.NVarChar(100)
+  description String? @db.NVarChar(400)
+  isSystem    Boolean @default(false)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@unique([code], map: "UQ_Roles_Code")
+  @@index([deletedAt], map: "IX_Roles_DeletedAt")
+  @@map("Roles")
+}
+
+model Permission {
+  id          String  @id @default(cuid()) @db.NVarChar(30)
+  module      String  @db.NVarChar(60)
+  action      String  @db.NVarChar(30)
+  code        String  @db.NVarChar(90)
+  description String? @db.NVarChar(300)
+
+  createdAt DateTime @default(now()) @db.DateTime2
+  updatedAt DateTime @updatedAt @db.DateTime2
+
+  roles RolePermission[]
+
+  @@unique([code], map: "UQ_Permissions_Code")
+  @@index([module], map: "IX_Permissions_Module")
+  @@map("Permissions")
+}
+
+model RolePermission {
+  id           String @id @default(cuid()) @db.NVarChar(30)
+  roleId       String @db.NVarChar(30)
+  permissionId String @db.NVarChar(30)
+
+  createdAt   DateTime @default(now()) @db.DateTime2
+  createdById String?  @db.NVarChar(30)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([roleId, permissionId], map: "UQ_RolePermissions_Role_Permission")
+  @@index([permissionId], map: "IX_RolePermissions_PermissionId")
+  @@map("RolePermissions")
+}
+
+model UserRole {
+  id     String @id @default(cuid()) @db.NVarChar(30)
+  userId String @db.NVarChar(30)
+  roleId String @db.NVarChar(30)
+
+  createdAt   DateTime @default(now()) @db.DateTime2
+  createdById String?  @db.NVarChar(30)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  role Role @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([userId, roleId], map: "UQ_UserRoles_User_Role")
+  @@index([roleId], map: "IX_UserRoles_RoleId")
+  @@map("UserRoles")
+}
+
+model Session {
+  id         String    @id @default(cuid()) @db.NVarChar(30)
+  userId     String    @db.NVarChar(30)
+  tokenHash  String    @db.NVarChar(255)
+  ipAddress  String?   @db.NVarChar(64)
+  userAgent  String?   @db.NVarChar(400)
+  expiresAt  DateTime  @db.DateTime2
+  revokedAt  DateTime? @db.DateTime2
+  lastSeenAt DateTime  @default(now()) @db.DateTime2
+
+  createdAt DateTime @default(now()) @db.DateTime2
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([tokenHash], map: "UQ_Sessions_TokenHash")
+  @@index([userId, expiresAt], map: "IX_Sessions_User_Expiry")
+  @@map("Sessions")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid()) @db.NVarChar(30)
+  userId    String    @db.NVarChar(30)
+  tokenHash String    @db.NVarChar(255)
+  expiresAt DateTime  @db.DateTime2
+  usedAt    DateTime? @db.DateTime2
+  requestIp String?   @db.NVarChar(64)
+
+  createdAt DateTime @default(now()) @db.DateTime2
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([tokenHash], map: "UQ_PasswordResetTokens_TokenHash")
+  @@index([userId], map: "IX_PasswordResetTokens_UserId")
+  @@map("PasswordResetTokens")
+}
+
+model LoginAttempt {
+  id         String  @id @default(cuid()) @db.NVarChar(30)
+  email      String  @db.NVarChar(180)
+  userId     String? @db.NVarChar(30)
+  successful Boolean
+  reason     String? @db.NVarChar(120)
+  ipAddress  String? @db.NVarChar(64)
+  userAgent  String? @db.NVarChar(400)
+
+  createdAt DateTime @default(now()) @db.DateTime2
+
+  user User? @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([email, createdAt], map: "IX_LoginAttempts_Email_CreatedAt")
+  @@map("LoginAttempts")
+}
+
+model AuditLog {
+  id         String  @id @default(cuid()) @db.NVarChar(30)
+  entityName String  @db.NVarChar(80)
+  entityId   String  @db.NVarChar(60)
+  action     String  @db.NVarChar(40)
+  summary    String? @db.NVarChar(400)
+  changes    String? @db.NVarChar(Max)
+  userId     String? @db.NVarChar(30)
+  ipAddress  String? @db.NVarChar(64)
+
+  createdAt DateTime @default(now()) @db.DateTime2
+
+  user User? @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([entityName, entityId], map: "IX_AuditLogs_Entity")
+  @@index([createdAt], map: "IX_AuditLogs_CreatedAt")
+  @@map("AuditLogs")
+}
+
+// ---------------------------------------------------------------------------
+// Reference data
+// ---------------------------------------------------------------------------
+
+model Currency {
+  id           String  @id @default(cuid()) @db.NVarChar(30)
+  code         String  @db.NVarChar(3)
+  name         String  @db.NVarChar(80)
+  symbol       String? @db.NVarChar(8)
+  decimalScale Int     @default(2)
+  isBase       Boolean @default(false)
+  isActive     Boolean @default(true)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  ratesFrom CurrencyRate[] @relation("CurrencyRateFrom")
+  ratesTo   CurrencyRate[] @relation("CurrencyRateTo")
+
+  @@unique([code], map: "UQ_Currencies_Code")
+  @@map("Currencies")
+}
+
+model CurrencyRate {
+  id             String   @id @default(cuid()) @db.NVarChar(30)
+  fromCurrencyId String   @db.NVarChar(30)
+  toCurrencyId   String   @db.NVarChar(30)
+  rate           Decimal  @db.Decimal(18, 8)
+  effectiveFrom  DateTime @db.DateTime2
+  source         String?  @db.NVarChar(60)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  fromCurrency Currency @relation("CurrencyRateFrom", fields: [fromCurrencyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  toCurrency   Currency @relation("CurrencyRateTo", fields: [toCurrencyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([fromCurrencyId, toCurrencyId, effectiveFrom], map: "UQ_CurrencyRates_Pair_Effective")
+  @@index([effectiveFrom], map: "IX_CurrencyRates_EffectiveFrom")
+  @@map("CurrencyRates")
+}
+
+model NumberSequence {
+  id         String @id @default(cuid()) @db.NVarChar(30)
+  key        String @db.NVarChar(60)
+  prefix     String @db.NVarChar(20)
+  period     String @db.NVarChar(10)
+  lastNumber Int    @default(0)
+  padding    Int    @default(6)
+
+  createdAt DateTime @default(now()) @db.DateTime2
+  updatedAt DateTime @updatedAt @db.DateTime2
+
+  @@unique([key, period], map: "UQ_NumberSequences_Key_Period")
+  @@map("NumberSequences")
+}
+
+model VendorType {
+  id          String  @id @default(cuid()) @db.NVarChar(30)
+  code        String  @db.NVarChar(40)
+  name        String  @db.NVarChar(100)
+  description String? @db.NVarChar(300)
+  isSupplier  Boolean @default(false)
+  isActive    Boolean @default(true)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  vendors Vendor[]
+
+  @@unique([code], map: "UQ_VendorTypes_Code")
+  @@map("VendorTypes")
+}
+
+model ExpenseCategory {
+  id           String  @id @default(cuid()) @db.NVarChar(30)
+  code         String  @db.NVarChar(40)
+  name         String  @db.NVarChar(100)
+  costGroup    String  @default("OTHER") @db.NVarChar(40)
+  isLandedCost Boolean @default(true)
+  isActive     Boolean @default(true)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  expenses Expense[]
+
+  @@unique([code], map: "UQ_ExpenseCategories_Code")
+  @@map("ExpenseCategories")
+}
+
+model ServiceCharge {
+  id          String  @id @default(cuid()) @db.NVarChar(30)
+  code        String  @db.NVarChar(40)
+  name        String  @db.NVarChar(120)
+  defaultRate Decimal @default(0) @db.Decimal(18, 4)
+  taxRate     Decimal @default(0) @db.Decimal(9, 4)
+  costGroup   String  @default("OTHER") @db.NVarChar(40)
+  isActive    Boolean @default(true)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  @@unique([code], map: "UQ_ServiceCharges_Code")
+  @@map("ServiceCharges")
+}
+
+model Warehouse {
+  id       String  @id @default(cuid()) @db.NVarChar(30)
+  code     String  @db.NVarChar(30)
+  name     String  @db.NVarChar(120)
+  address  String? @db.NVarChar(300)
+  city     String? @db.NVarChar(80)
+  isActive Boolean @default(true)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  goodsReceipts  GoodsReceipt[]
+  stockBalances  StockBalance[]
+  stockMovements StockMovement[]
+
+  @@unique([code], map: "UQ_Warehouses_Code")
+  @@map("Warehouses")
+}
+
+// ---------------------------------------------------------------------------
+// Product catalogue
+// ---------------------------------------------------------------------------
+
+model ProductCategory {
+  id       String  @id @default(cuid()) @db.NVarChar(30)
+  code     String  @db.NVarChar(40)
+  name     String  @db.NVarChar(120)
+  isActive Boolean @default(true)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  products Product[]
+
+  @@unique([code], map: "UQ_ProductCategories_Code")
+  @@map("ProductCategories")
+}
+
+model Product {
+  id            String  @id @default(cuid()) @db.NVarChar(30)
+  sku           String  @db.NVarChar(60)
+  name          String  @db.NVarChar(200)
+  categoryId    String? @db.NVarChar(30)
+  description   String? @db.NVarChar(Max)
+  unitOfMeasure String  @default("PCS") @db.NVarChar(20)
+  hsCode        String? @db.NVarChar(30)
+  barcode       String? @db.NVarChar(60)
+  brand         String? @db.NVarChar(120)
+  unitWeightKg  Decimal @default(0) @db.Decimal(18, 3)
+  unitVolumeCbm Decimal @default(0) @db.Decimal(18, 4)
+  reorderLevel  Decimal @default(0) @db.Decimal(18, 3)
+  isActive      Boolean @default(true)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  category       ProductCategory?   @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shipmentItems  ShipmentItem[]
+  receiptItems   GoodsReceiptItem[]
+  stockBalances  StockBalance[]
+  stockMovements StockMovement[]
+
+  @@unique([sku], map: "UQ_Products_Sku")
+  @@index([name], map: "IX_Products_Name")
+  @@index([categoryId], map: "IX_Products_CategoryId")
+  @@index([isActive, deletedAt], map: "IX_Products_Active_DeletedAt")
+  @@map("Products")
+}
+
+// ---------------------------------------------------------------------------
+// Suppliers and service providers
+// ---------------------------------------------------------------------------
+
+model Vendor {
+  id              String  @id @default(cuid()) @db.NVarChar(30)
+  code            String  @db.NVarChar(30)
+  vendorTypeId    String  @db.NVarChar(30)
+  name            String  @db.NVarChar(150)
+  companyName     String? @db.NVarChar(180)
+  contactPerson   String? @db.NVarChar(120)
+  email           String? @db.NVarChar(180)
+  phone           String? @db.NVarChar(40)
+  addressLine1    String? @db.NVarChar(200)
+  addressLine2    String? @db.NVarChar(200)
+  city            String? @db.NVarChar(80)
+  country         String? @db.NVarChar(80)
+  taxNumber       String? @db.NVarChar(60)
+  currencyCode    String  @default("USD") @db.NVarChar(3)
+  paymentTermDays Int     @default(30)
+  status          String  @default("ACTIVE") @db.NVarChar(30)
+  scacCode        String? @db.NVarChar(20)
+  notes           String? @db.NVarChar(Max)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  vendorType        VendorType      @relation(fields: [vendorTypeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  purchaseOrders    PurchaseOrder[]
+  invoices          VendorInvoice[]
+  payments          VendorPayment[]
+  suppliedShipments Shipment[]      @relation("ShipmentSupplier")
+  carriedShipments  Shipment[]      @relation("ShipmentCarrier")
+
+  @@unique([code], map: "UQ_Vendors_Code")
+  @@index([vendorTypeId], map: "IX_Vendors_VendorTypeId")
+  @@index([name], map: "IX_Vendors_Name")
+  @@index([status, deletedAt], map: "IX_Vendors_Status_DeletedAt")
+  @@map("Vendors")
+}
+
+model ClearingAgent {
+  id              String  @id @default(cuid()) @db.NVarChar(30)
+  code            String  @db.NVarChar(30)
+  name            String  @db.NVarChar(150)
+  companyName     String? @db.NVarChar(180)
+  licenseNumber   String? @db.NVarChar(60)
+  contactPerson   String? @db.NVarChar(120)
+  email           String? @db.NVarChar(180)
+  phone           String? @db.NVarChar(40)
+  addressLine1    String? @db.NVarChar(200)
+  city            String? @db.NVarChar(80)
+  country         String? @db.NVarChar(80)
+  portOfOperation String? @db.NVarChar(120)
+  currencyCode    String  @default("PKR") @db.NVarChar(3)
+  paymentTermDays Int     @default(15)
+  status          String  @default("ACTIVE") @db.NVarChar(30)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  invoices  AgentInvoice[]
+  payments  AgentPayment[]
+  shipments Shipment[]     @relation("ShipmentClearingAgent")
+
+  @@unique([code], map: "UQ_ClearingAgents_Code")
+  @@index([status, deletedAt], map: "IX_ClearingAgents_Status_DeletedAt")
+  @@map("ClearingAgents")
+}
+
+model MoneyChanger {
+  id            String  @id @default(cuid()) @db.NVarChar(30)
+  code          String  @db.NVarChar(30)
+  name          String  @db.NVarChar(150)
+  companyName   String? @db.NVarChar(180)
+  licenseNumber String? @db.NVarChar(60)
+  contactPerson String? @db.NVarChar(120)
+  phone         String? @db.NVarChar(40)
+  email         String? @db.NVarChar(180)
+  city          String? @db.NVarChar(80)
+  country       String? @db.NVarChar(80)
+  status        String  @default("ACTIVE") @db.NVarChar(30)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  exchanges CurrencyExchange[]
+
+  @@unique([code], map: "UQ_MoneyChangers_Code")
+  @@map("MoneyChangers")
+}
+
+model CurrencyExchange {
+  id             String   @id @default(cuid()) @db.NVarChar(30)
+  referenceNo    String   @db.NVarChar(40)
+  moneyChangerId String   @db.NVarChar(30)
+  shipmentId     String?  @db.NVarChar(30)
+  exchangeDate   DateTime @db.DateTime2
+  fromCurrency   String   @db.NVarChar(3)
+  toCurrency     String   @db.NVarChar(3)
+  fromAmount     Decimal  @db.Decimal(18, 4)
+  rate           Decimal  @db.Decimal(18, 8)
+  toAmount       Decimal  @db.Decimal(18, 4)
+  commission     Decimal  @default(0) @db.Decimal(18, 4)
+  netAmount      Decimal  @db.Decimal(18, 4)
+  settlementMode String   @default("CASH") @db.NVarChar(30)
+  status         String   @default("COMPLETED") @db.NVarChar(30)
+  remarks        String?  @db.NVarChar(400)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  moneyChanger MoneyChanger @relation(fields: [moneyChangerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shipment     Shipment?    @relation(fields: [shipmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([referenceNo], map: "UQ_CurrencyExchanges_ReferenceNo")
+  @@index([moneyChangerId, exchangeDate], map: "IX_CurrencyExchanges_Changer_Date")
+  @@map("CurrencyExchanges")
+}
+
+// ---------------------------------------------------------------------------
+// Import shipments
+//
+// A shipment is one consignment we import. It carries the goods value from its
+// line items plus every additional cost incurred until the goods reach stock,
+// which together form the landed cost.
+// ---------------------------------------------------------------------------
+
+model Shipment {
+  id               String  @id @default(cuid()) @db.NVarChar(30)
+  shipmentNo       String  @db.NVarChar(40)
+  supplierVendorId String  @db.NVarChar(30)
+  carrierVendorId  String? @db.NVarChar(30)
+  clearingAgentId  String? @db.NVarChar(30)
+
+  supplierInvoiceNo   String?   @db.NVarChar(60)
+  supplierInvoiceDate DateTime? @db.DateTime2
+
+  shipmentType  String  @default("IMPORT") @db.NVarChar(30)
+  transportMode String  @db.NVarChar(30)
+  serviceType   String  @default("PORT_TO_PORT") @db.NVarChar(40)
+  incoterm      String? @db.NVarChar(10)
+  status        String  @default("DRAFT") @db.NVarChar(40)
+
+  originCountry      String? @db.NVarChar(80)
+  originPort         String  @db.NVarChar(120)
+  destinationCountry String? @db.NVarChar(80)
+  destinationPort    String  @db.NVarChar(120)
+
+  bookingNo          String? @db.NVarChar(60)
+  masterBlNo         String? @db.NVarChar(60)
+  houseBlNo          String? @db.NVarChar(60)
+  vesselName         String? @db.NVarChar(120)
+  voyageNo           String? @db.NVarChar(40)
+  flightNo           String? @db.NVarChar(40)
+  goodsDeclarationNo String? @db.NVarChar(60)
+
+  cargoDescription    String? @db.NVarChar(Max)
+  packageCount        Int     @default(0)
+  packageType         String? @db.NVarChar(40)
+  grossWeightKg       Decimal @default(0) @db.Decimal(18, 3)
+  netWeightKg         Decimal @default(0) @db.Decimal(18, 3)
+  volumeCbm           Decimal @default(0) @db.Decimal(18, 3)
+  chargeableWeight    Decimal @default(0) @db.Decimal(18, 3)
+  isHazardous         Boolean @default(false)
+  requiresTempControl Boolean @default(false)
+
+  orderDate         DateTime? @db.DateTime2
+  bookingDate       DateTime? @db.DateTime2
+  cargoReceivedDate DateTime? @db.DateTime2
+  shippingDate      DateTime? @db.DateTime2
+  expectedArrival   DateTime? @db.DateTime2
+  actualArrival     DateTime? @db.DateTime2
+  clearanceDate     DateTime? @db.DateTime2
+  deliveryDate      DateTime? @db.DateTime2
+  closedAt          DateTime? @db.DateTime2
+
+  supplierCurrency String  @default("USD") @db.NVarChar(3)
+  exchangeRate     Decimal @default(1) @db.Decimal(18, 8)
+  baseCurrency     String  @default("PKR") @db.NVarChar(3)
+
+  costAllocationBasis String @default("VALUE") @db.NVarChar(20)
+
+  goodsValue      Decimal @default(0) @db.Decimal(18, 4)
+  freightCost     Decimal @default(0) @db.Decimal(18, 4)
+  dutyCost        Decimal @default(0) @db.Decimal(18, 4)
+  clearingCost    Decimal @default(0) @db.Decimal(18, 4)
+  otherCost       Decimal @default(0) @db.Decimal(18, 4)
+  additionalCost  Decimal @default(0) @db.Decimal(18, 4)
+  totalLandedCost Decimal @default(0) @db.Decimal(18, 4)
+  budgetedCost    Decimal @default(0) @db.Decimal(18, 4)
+
+  remarks String? @db.NVarChar(Max)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  supplier      Vendor         @relation("ShipmentSupplier", fields: [supplierVendorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  carrier       Vendor?        @relation("ShipmentCarrier", fields: [carrierVendorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  clearingAgent ClearingAgent? @relation("ShipmentClearingAgent", fields: [clearingAgentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  items          ShipmentItem[]
+  containers     ShipmentContainer[]
+  documents      ShipmentDocument[]
+  statusHistory  ShipmentStatusHistory[]
+  trackingEvents ShipmentTrackingEvent[]
+  charges        ShipmentCharge[]
+  purchaseOrders PurchaseOrder[]
+  vendorInvoices VendorInvoice[]
+  agentInvoices  AgentInvoice[]
+  expenses       Expense[]
+  exchanges      CurrencyExchange[]
+  goodsReceipts  GoodsReceipt[]
+
+  @@unique([shipmentNo], map: "UQ_Shipments_ShipmentNo")
+  @@index([supplierVendorId], map: "IX_Shipments_SupplierVendorId")
+  @@index([status, deletedAt], map: "IX_Shipments_Status_DeletedAt")
+  @@index([shippingDate], map: "IX_Shipments_ShippingDate")
+  @@index([expectedArrival], map: "IX_Shipments_ExpectedArrival")
+  @@index([carrierVendorId], map: "IX_Shipments_CarrierVendorId")
+  @@map("Shipments")
+}
+
+model ShipmentItem {
+  id         String @id @default(cuid()) @db.NVarChar(30)
+  shipmentId String @db.NVarChar(30)
+  productId  String @db.NVarChar(30)
+  lineNumber Int
+
+  description String? @db.NVarChar(300)
+
+  quantityOrdered  Decimal @default(0) @db.Decimal(18, 3)
+  quantityReceived Decimal @default(0) @db.Decimal(18, 3)
+  quantityDamaged  Decimal @default(0) @db.Decimal(18, 3)
+
+  unitPrice     Decimal @default(0) @db.Decimal(18, 4)
+  currencyCode  String  @default("USD") @db.NVarChar(3)
+  exchangeRate  Decimal @default(1) @db.Decimal(18, 8)
+  lineTotal     Decimal @default(0) @db.Decimal(18, 4)
+  baseLineTotal Decimal @default(0) @db.Decimal(18, 4)
+
+  lineWeightKg  Decimal @default(0) @db.Decimal(18, 3)
+  lineVolumeCbm Decimal @default(0) @db.Decimal(18, 4)
+
+  allocatedCost  Decimal @default(0) @db.Decimal(18, 4)
+  totalCost      Decimal @default(0) @db.Decimal(18, 4)
+  unitLandedCost Decimal @default(0) @db.Decimal(18, 4)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  shipment     Shipment           @relation(fields: [shipmentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  product      Product            @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  receiptItems GoodsReceiptItem[]
+
+  @@unique([shipmentId, lineNumber], map: "UQ_ShipmentItems_Shipment_Line")
+  @@index([shipmentId], map: "IX_ShipmentItems_ShipmentId")
+  @@index([productId], map: "IX_ShipmentItems_ProductId")
+  @@map("ShipmentItems")
+}
+
+model ShipmentContainer {
+  id            String    @id @default(cuid()) @db.NVarChar(30)
+  shipmentId    String    @db.NVarChar(30)
+  containerNo   String    @db.NVarChar(20)
+  containerType String    @db.NVarChar(20)
+  sealNo        String?   @db.NVarChar(40)
+  tareWeightKg  Decimal   @default(0) @db.Decimal(18, 3)
+  grossWeightKg Decimal   @default(0) @db.Decimal(18, 3)
+  volumeCbm     Decimal   @default(0) @db.Decimal(18, 3)
+  packageCount  Int       @default(0)
+  loadedAt      DateTime? @db.DateTime2
+  dischargedAt  DateTime? @db.DateTime2
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([shipmentId], map: "IX_ShipmentContainers_ShipmentId")
+  @@index([containerNo], map: "IX_ShipmentContainers_ContainerNo")
+  @@map("ShipmentContainers")
+}
+
+model ShipmentStatusHistory {
+  id         String   @id @default(cuid()) @db.NVarChar(30)
+  shipmentId String   @db.NVarChar(30)
+  fromStatus String?  @db.NVarChar(40)
+  toStatus   String   @db.NVarChar(40)
+  remarks    String?  @db.NVarChar(400)
+  occurredAt DateTime @default(now()) @db.DateTime2
+
+  createdAt   DateTime @default(now()) @db.DateTime2
+  createdById String?  @db.NVarChar(30)
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([shipmentId, occurredAt], map: "IX_ShipmentStatusHistory_Shipment_OccurredAt")
+  @@map("ShipmentStatusHistory")
+}
+
+model ShipmentTrackingEvent {
+  id          String   @id @default(cuid()) @db.NVarChar(30)
+  shipmentId  String   @db.NVarChar(30)
+  eventCode   String   @db.NVarChar(40)
+  description String   @db.NVarChar(300)
+  location    String?  @db.NVarChar(150)
+  occurredAt  DateTime @db.DateTime2
+  source      String   @default("MANUAL") @db.NVarChar(40)
+  isPublic    Boolean  @default(true)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([shipmentId, occurredAt], map: "IX_ShipmentTrackingEvents_Shipment_OccurredAt")
+  @@map("ShipmentTrackingEvents")
+}
+
+model ShipmentCharge {
+  id           String  @id @default(cuid()) @db.NVarChar(30)
+  shipmentId   String  @db.NVarChar(30)
+  costGroup    String  @default("OTHER") @db.NVarChar(40)
+  description  String  @db.NVarChar(200)
+  quantity     Decimal @default(1) @db.Decimal(18, 4)
+  unitRate     Decimal @default(0) @db.Decimal(18, 4)
+  currencyCode String  @default("PKR") @db.NVarChar(3)
+  exchangeRate Decimal @default(1) @db.Decimal(18, 8)
+  amount       Decimal @default(0) @db.Decimal(18, 4)
+  baseAmount   Decimal @default(0) @db.Decimal(18, 4)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([shipmentId, costGroup], map: "IX_ShipmentCharges_Shipment_Group")
+  @@map("ShipmentCharges")
+}
+
+model ShipmentDocument {
+  id           String    @id @default(cuid()) @db.NVarChar(30)
+  shipmentId   String    @db.NVarChar(30)
+  documentType String    @db.NVarChar(50)
+  title        String    @db.NVarChar(200)
+  fileName     String    @db.NVarChar(255)
+  storageKey   String    @db.NVarChar(400)
+  mimeType     String    @db.NVarChar(120)
+  fileSize     Int
+  checksum     String?   @db.NVarChar(80)
+  version      Int       @default(1)
+  issuedDate   DateTime? @db.DateTime2
+  expiryDate   DateTime? @db.DateTime2
+  remarks      String?   @db.NVarChar(400)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([shipmentId, documentType], map: "IX_ShipmentDocuments_Shipment_Type")
+  @@map("ShipmentDocuments")
+}
+
+// ---------------------------------------------------------------------------
+// Procurement and payables
+//
+// costGroup decides how an invoice affects the landed cost. GOODS invoices are
+// the supplier's commercial invoice; their value already arrives through the
+// shipment line items, so they create a payable without being allocated twice.
+// ---------------------------------------------------------------------------
+
+model PurchaseOrder {
+  id           String    @id @default(cuid()) @db.NVarChar(30)
+  poNumber     String    @db.NVarChar(40)
+  vendorId     String    @db.NVarChar(30)
+  shipmentId   String?   @db.NVarChar(30)
+  orderDate    DateTime  @db.DateTime2
+  expectedDate DateTime? @db.DateTime2
+  currencyCode String    @default("USD") @db.NVarChar(3)
+  exchangeRate Decimal   @default(1) @db.Decimal(18, 8)
+  status       String    @default("DRAFT") @db.NVarChar(30)
+
+  subTotal       Decimal @default(0) @db.Decimal(18, 4)
+  taxTotal       Decimal @default(0) @db.Decimal(18, 4)
+  discountTotal  Decimal @default(0) @db.Decimal(18, 4)
+  grandTotal     Decimal @default(0) @db.Decimal(18, 4)
+  baseGrandTotal Decimal @default(0) @db.Decimal(18, 4)
+
+  approvedById String?   @db.NVarChar(30)
+  approvedAt   DateTime? @db.DateTime2
+  cancelledAt  DateTime? @db.DateTime2
+  cancelReason String?   @db.NVarChar(400)
+  terms        String?   @db.NVarChar(Max)
+  remarks      String?   @db.NVarChar(Max)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  vendor   Vendor              @relation(fields: [vendorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shipment Shipment?           @relation(fields: [shipmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items    PurchaseOrderItem[]
+  invoices VendorInvoice[]
+
+  @@unique([poNumber], map: "UQ_PurchaseOrders_PoNumber")
+  @@index([vendorId, status], map: "IX_PurchaseOrders_Vendor_Status")
+  @@index([shipmentId], map: "IX_PurchaseOrders_ShipmentId")
+  @@index([orderDate], map: "IX_PurchaseOrders_OrderDate")
+  @@map("PurchaseOrders")
+}
+
+model PurchaseOrderItem {
+  id              String  @id @default(cuid()) @db.NVarChar(30)
+  purchaseOrderId String  @db.NVarChar(30)
+  lineNumber      Int
+  description     String  @db.NVarChar(300)
+  serviceCode     String? @db.NVarChar(40)
+  quantity        Decimal @default(1) @db.Decimal(18, 4)
+  unitRate        Decimal @default(0) @db.Decimal(18, 4)
+  discountRate    Decimal @default(0) @db.Decimal(9, 4)
+  taxRate         Decimal @default(0) @db.Decimal(9, 4)
+  lineSubTotal    Decimal @default(0) @db.Decimal(18, 4)
+  lineTaxAmount   Decimal @default(0) @db.Decimal(18, 4)
+  lineTotal       Decimal @default(0) @db.Decimal(18, 4)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([purchaseOrderId, lineNumber], map: "UQ_PurchaseOrderItems_Po_Line")
+  @@map("PurchaseOrderItems")
+}
+
+model VendorInvoice {
+  id              String   @id @default(cuid()) @db.NVarChar(30)
+  invoiceNo       String   @db.NVarChar(40)
+  vendorRefNo     String?  @db.NVarChar(60)
+  vendorId        String   @db.NVarChar(30)
+  shipmentId      String?  @db.NVarChar(30)
+  purchaseOrderId String?  @db.NVarChar(30)
+  costGroup       String   @default("FREIGHT") @db.NVarChar(40)
+  invoiceDate     DateTime @db.DateTime2
+  dueDate         DateTime @db.DateTime2
+  currencyCode    String   @default("USD") @db.NVarChar(3)
+  exchangeRate    Decimal  @default(1) @db.Decimal(18, 8)
+  status          String   @default("PENDING") @db.NVarChar(30)
+
+  subTotal       Decimal @default(0) @db.Decimal(18, 4)
+  taxTotal       Decimal @default(0) @db.Decimal(18, 4)
+  discountTotal  Decimal @default(0) @db.Decimal(18, 4)
+  grandTotal     Decimal @default(0) @db.Decimal(18, 4)
+  baseGrandTotal Decimal @default(0) @db.Decimal(18, 4)
+  paidAmount     Decimal @default(0) @db.Decimal(18, 4)
+  balanceAmount  Decimal @default(0) @db.Decimal(18, 4)
+
+  postedAt     DateTime? @db.DateTime2
+  cancelledAt  DateTime? @db.DateTime2
+  cancelReason String?   @db.NVarChar(400)
+  documentKey  String?   @db.NVarChar(400)
+  remarks      String?   @db.NVarChar(Max)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  vendor        Vendor                    @relation(fields: [vendorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shipment      Shipment?                 @relation(fields: [shipmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  purchaseOrder PurchaseOrder?            @relation(fields: [purchaseOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items         VendorInvoiceItem[]
+  allocations   VendorPaymentAllocation[]
+
+  @@unique([invoiceNo], map: "UQ_VendorInvoices_InvoiceNo")
+  @@index([vendorId, status], map: "IX_VendorInvoices_Vendor_Status")
+  @@index([shipmentId], map: "IX_VendorInvoices_ShipmentId")
+  @@index([dueDate], map: "IX_VendorInvoices_DueDate")
+  @@map("VendorInvoices")
+}
+
+model VendorInvoiceItem {
+  id              String  @id @default(cuid()) @db.NVarChar(30)
+  vendorInvoiceId String  @db.NVarChar(30)
+  lineNumber      Int
+  description     String  @db.NVarChar(300)
+  serviceCode     String? @db.NVarChar(40)
+  quantity        Decimal @default(1) @db.Decimal(18, 4)
+  unitRate        Decimal @default(0) @db.Decimal(18, 4)
+  discountRate    Decimal @default(0) @db.Decimal(9, 4)
+  taxRate         Decimal @default(0) @db.Decimal(9, 4)
+  lineSubTotal    Decimal @default(0) @db.Decimal(18, 4)
+  lineTaxAmount   Decimal @default(0) @db.Decimal(18, 4)
+  lineTotal       Decimal @default(0) @db.Decimal(18, 4)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  vendorInvoice VendorInvoice @relation(fields: [vendorInvoiceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([vendorInvoiceId, lineNumber], map: "UQ_VendorInvoiceItems_Invoice_Line")
+  @@map("VendorInvoiceItems")
+}
+
+model VendorPayment {
+  id              String   @id @default(cuid()) @db.NVarChar(30)
+  paymentNo       String   @db.NVarChar(40)
+  vendorId        String   @db.NVarChar(30)
+  paymentDate     DateTime @db.DateTime2
+  paymentMethod   String   @db.NVarChar(30)
+  currencyCode    String   @default("PKR") @db.NVarChar(3)
+  exchangeRate    Decimal  @default(1) @db.Decimal(18, 8)
+  amount          Decimal  @db.Decimal(18, 4)
+  baseAmount      Decimal  @db.Decimal(18, 4)
+  allocatedAmount Decimal  @default(0) @db.Decimal(18, 4)
+  status          String   @default("POSTED") @db.NVarChar(30)
+
+  bankAccount  String?   @db.NVarChar(80)
+  referenceNo  String?   @db.NVarChar(80)
+  chequeNo     String?   @db.NVarChar(60)
+  chequeDate   DateTime? @db.DateTime2
+  cancelledAt  DateTime? @db.DateTime2
+  cancelReason String?   @db.NVarChar(400)
+  remarks      String?   @db.NVarChar(Max)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  vendor      Vendor                    @relation(fields: [vendorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  allocations VendorPaymentAllocation[]
+
+  @@unique([paymentNo], map: "UQ_VendorPayments_PaymentNo")
+  @@index([vendorId, paymentDate], map: "IX_VendorPayments_Vendor_Date")
+  @@map("VendorPayments")
+}
+
+model VendorPaymentAllocation {
+  id              String  @id @default(cuid()) @db.NVarChar(30)
+  vendorPaymentId String  @db.NVarChar(30)
+  vendorInvoiceId String  @db.NVarChar(30)
+  amount          Decimal @db.Decimal(18, 4)
+  baseAmount      Decimal @db.Decimal(18, 4)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  payment VendorPayment @relation(fields: [vendorPaymentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  invoice VendorInvoice @relation(fields: [vendorInvoiceId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([vendorPaymentId, vendorInvoiceId], map: "UQ_VendorPaymentAllocations_Payment_Invoice")
+  @@index([vendorInvoiceId], map: "IX_VendorPaymentAllocations_InvoiceId")
+  @@map("VendorPaymentAllocations")
+}
+
+model AgentInvoice {
+  id              String   @id @default(cuid()) @db.NVarChar(30)
+  invoiceNo       String   @db.NVarChar(40)
+  agentRefNo      String?  @db.NVarChar(60)
+  clearingAgentId String   @db.NVarChar(30)
+  shipmentId      String?  @db.NVarChar(30)
+  invoiceDate     DateTime @db.DateTime2
+  dueDate         DateTime @db.DateTime2
+  currencyCode    String   @default("PKR") @db.NVarChar(3)
+  exchangeRate    Decimal  @default(1) @db.Decimal(18, 8)
+  status          String   @default("PENDING") @db.NVarChar(30)
+
+  subTotal       Decimal @default(0) @db.Decimal(18, 4)
+  taxTotal       Decimal @default(0) @db.Decimal(18, 4)
+  dutyAmount     Decimal @default(0) @db.Decimal(18, 4)
+  salesTaxAmount Decimal @default(0) @db.Decimal(18, 4)
+  reimbursable   Decimal @default(0) @db.Decimal(18, 4)
+  grandTotal     Decimal @default(0) @db.Decimal(18, 4)
+  baseGrandTotal Decimal @default(0) @db.Decimal(18, 4)
+  paidAmount     Decimal @default(0) @db.Decimal(18, 4)
+  balanceAmount  Decimal @default(0) @db.Decimal(18, 4)
+
+  postedAt     DateTime? @db.DateTime2
+  cancelledAt  DateTime? @db.DateTime2
+  cancelReason String?   @db.NVarChar(400)
+  documentKey  String?   @db.NVarChar(400)
+  remarks      String?   @db.NVarChar(Max)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  clearingAgent ClearingAgent            @relation(fields: [clearingAgentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shipment      Shipment?                @relation(fields: [shipmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items         AgentInvoiceItem[]
+  allocations   AgentPaymentAllocation[]
+
+  @@unique([invoiceNo], map: "UQ_AgentInvoices_InvoiceNo")
+  @@index([clearingAgentId, status], map: "IX_AgentInvoices_Agent_Status")
+  @@index([shipmentId], map: "IX_AgentInvoices_ShipmentId")
+  @@map("AgentInvoices")
+}
+
+model AgentInvoiceItem {
+  id             String  @id @default(cuid()) @db.NVarChar(30)
+  agentInvoiceId String  @db.NVarChar(30)
+  lineNumber     Int
+  description    String  @db.NVarChar(300)
+  chargeCategory String  @default("SERVICE") @db.NVarChar(40)
+  quantity       Decimal @default(1) @db.Decimal(18, 4)
+  unitRate       Decimal @default(0) @db.Decimal(18, 4)
+  taxRate        Decimal @default(0) @db.Decimal(9, 4)
+  lineSubTotal   Decimal @default(0) @db.Decimal(18, 4)
+  lineTaxAmount  Decimal @default(0) @db.Decimal(18, 4)
+  lineTotal      Decimal @default(0) @db.Decimal(18, 4)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  agentInvoice AgentInvoice @relation(fields: [agentInvoiceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([agentInvoiceId, lineNumber], map: "UQ_AgentInvoiceItems_Invoice_Line")
+  @@map("AgentInvoiceItems")
+}
+
+model AgentPayment {
+  id              String   @id @default(cuid()) @db.NVarChar(30)
+  paymentNo       String   @db.NVarChar(40)
+  clearingAgentId String   @db.NVarChar(30)
+  paymentDate     DateTime @db.DateTime2
+  paymentMethod   String   @db.NVarChar(30)
+  currencyCode    String   @default("PKR") @db.NVarChar(3)
+  exchangeRate    Decimal  @default(1) @db.Decimal(18, 8)
+  amount          Decimal  @db.Decimal(18, 4)
+  baseAmount      Decimal  @db.Decimal(18, 4)
+  allocatedAmount Decimal  @default(0) @db.Decimal(18, 4)
+  status          String   @default("POSTED") @db.NVarChar(30)
+
+  referenceNo  String?   @db.NVarChar(80)
+  cancelledAt  DateTime? @db.DateTime2
+  cancelReason String?   @db.NVarChar(400)
+  remarks      String?   @db.NVarChar(Max)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  clearingAgent ClearingAgent            @relation(fields: [clearingAgentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  allocations   AgentPaymentAllocation[]
+
+  @@unique([paymentNo], map: "UQ_AgentPayments_PaymentNo")
+  @@index([clearingAgentId, paymentDate], map: "IX_AgentPayments_Agent_Date")
+  @@map("AgentPayments")
+}
+
+model AgentPaymentAllocation {
+  id             String  @id @default(cuid()) @db.NVarChar(30)
+  agentPaymentId String  @db.NVarChar(30)
+  agentInvoiceId String  @db.NVarChar(30)
+  amount         Decimal @db.Decimal(18, 4)
+  baseAmount     Decimal @db.Decimal(18, 4)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  payment AgentPayment @relation(fields: [agentPaymentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  invoice AgentInvoice @relation(fields: [agentInvoiceId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([agentPaymentId, agentInvoiceId], map: "UQ_AgentPaymentAllocations_Payment_Invoice")
+  @@index([agentInvoiceId], map: "IX_AgentPaymentAllocations_InvoiceId")
+  @@map("AgentPaymentAllocations")
+}
+
+model Expense {
+  id            String   @id @default(cuid()) @db.NVarChar(30)
+  expenseNo     String   @db.NVarChar(40)
+  categoryId    String   @db.NVarChar(30)
+  shipmentId    String?  @db.NVarChar(30)
+  expenseDate   DateTime @db.DateTime2
+  description   String   @db.NVarChar(300)
+  currencyCode  String   @default("PKR") @db.NVarChar(3)
+  exchangeRate  Decimal  @default(1) @db.Decimal(18, 8)
+  amount        Decimal  @db.Decimal(18, 4)
+  taxAmount     Decimal  @default(0) @db.Decimal(18, 4)
+  totalAmount   Decimal  @db.Decimal(18, 4)
+  baseAmount    Decimal  @db.Decimal(18, 4)
+  paymentMethod String   @default("CASH") @db.NVarChar(30)
+  status        String   @default("RECORDED") @db.NVarChar(30)
+  isLandedCost  Boolean  @default(true)
+  referenceNo   String?  @db.NVarChar(80)
+  documentKey   String?  @db.NVarChar(400)
+
+  approvedById String?   @db.NVarChar(30)
+  approvedAt   DateTime? @db.DateTime2
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  category ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shipment Shipment?       @relation(fields: [shipmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([expenseNo], map: "UQ_Expenses_ExpenseNo")
+  @@index([categoryId], map: "IX_Expenses_CategoryId")
+  @@index([expenseDate], map: "IX_Expenses_ExpenseDate")
+  @@index([shipmentId], map: "IX_Expenses_ShipmentId")
+  @@map("Expenses")
+}
+
+// ---------------------------------------------------------------------------
+// Goods receipt and inventory
+//
+// Receiving is the end of the costing journey. Each received line carries the
+// landed unit cost calculated for its shipment line, and stock is valued at
+// that cost using a weighted average per product and warehouse.
+// ---------------------------------------------------------------------------
+
+model GoodsReceipt {
+  id          String   @id @default(cuid()) @db.NVarChar(30)
+  receiptNo   String   @db.NVarChar(40)
+  shipmentId  String   @db.NVarChar(30)
+  warehouseId String   @db.NVarChar(30)
+  receiptDate DateTime @db.DateTime2
+  status      String   @default("DRAFT") @db.NVarChar(30)
+
+  totalQuantity Decimal @default(0) @db.Decimal(18, 3)
+  totalCost     Decimal @default(0) @db.Decimal(18, 4)
+
+  postedAt     DateTime? @db.DateTime2
+  cancelledAt  DateTime? @db.DateTime2
+  cancelReason String?   @db.NVarChar(400)
+  remarks      String?   @db.NVarChar(Max)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  shipment  Shipment           @relation(fields: [shipmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  warehouse Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items     GoodsReceiptItem[]
+
+  @@unique([receiptNo], map: "UQ_GoodsReceipts_ReceiptNo")
+  @@index([shipmentId], map: "IX_GoodsReceipts_ShipmentId")
+  @@index([receiptDate], map: "IX_GoodsReceipts_ReceiptDate")
+  @@index([status, deletedAt], map: "IX_GoodsReceipts_Status_DeletedAt")
+  @@map("GoodsReceipts")
+}
+
+model GoodsReceiptItem {
+  id             String @id @default(cuid()) @db.NVarChar(30)
+  goodsReceiptId String @db.NVarChar(30)
+  shipmentItemId String @db.NVarChar(30)
+  productId      String @db.NVarChar(30)
+  lineNumber     Int
+
+  quantityReceived Decimal @default(0) @db.Decimal(18, 3)
+  quantityDamaged  Decimal @default(0) @db.Decimal(18, 3)
+  unitLandedCost   Decimal @default(0) @db.Decimal(18, 4)
+  totalCost        Decimal @default(0) @db.Decimal(18, 4)
+  batchNo          String? @db.NVarChar(60)
+  remarks          String? @db.NVarChar(300)
+
+  createdAt   DateTime  @default(now()) @db.DateTime2
+  updatedAt   DateTime  @updatedAt @db.DateTime2
+  createdById String?   @db.NVarChar(30)
+  updatedById String?   @db.NVarChar(30)
+  deletedAt   DateTime? @db.DateTime2
+  deletedById String?   @db.NVarChar(30)
+
+  goodsReceipt GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  shipmentItem ShipmentItem @relation(fields: [shipmentItemId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([goodsReceiptId, lineNumber], map: "UQ_GoodsReceiptItems_Receipt_Line")
+  @@index([productId], map: "IX_GoodsReceiptItems_ProductId")
+  @@index([shipmentItemId], map: "IX_GoodsReceiptItems_ShipmentItemId")
+  @@map("GoodsReceiptItems")
+}
+
+model StockBalance {
+  id              String  @id @default(cuid()) @db.NVarChar(30)
+  productId       String  @db.NVarChar(30)
+  warehouseId     String  @db.NVarChar(30)
+  quantityOnHand  Decimal @default(0) @db.Decimal(18, 3)
+  averageUnitCost Decimal @default(0) @db.Decimal(18, 4)
+  totalValue      Decimal @default(0) @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now()) @db.DateTime2
+  updatedAt DateTime @updatedAt @db.DateTime2
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([productId, warehouseId], map: "UQ_StockBalances_Product_Warehouse")
+  @@index([warehouseId], map: "IX_StockBalances_WarehouseId")
+  @@map("StockBalances")
+}
+
+model StockMovement {
+  id            String   @id @default(cuid()) @db.NVarChar(30)
+  productId     String   @db.NVarChar(30)
+  warehouseId   String   @db.NVarChar(30)
+  movementType  String   @db.NVarChar(30)
+  movementDate  DateTime @db.DateTime2
+  quantity      Decimal  @db.Decimal(18, 3)
+  unitCost      Decimal  @default(0) @db.Decimal(18, 4)
+  totalCost     Decimal  @default(0) @db.Decimal(18, 4)
+  balanceAfter  Decimal  @default(0) @db.Decimal(18, 3)
+  referenceType String   @db.NVarChar(40)
+  referenceId   String   @db.NVarChar(30)
+  referenceNo   String   @db.NVarChar(40)
+  shipmentId    String?  @db.NVarChar(30)
+  narration     String?  @db.NVarChar(300)
+  isReversal    Boolean  @default(false)
+
+  createdAt   DateTime @default(now()) @db.DateTime2
+  createdById String?  @db.NVarChar(30)
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([productId, movementDate], map: "IX_StockMovements_Product_Date")
+  @@index([referenceType, referenceId], map: "IX_StockMovements_Reference")
+  @@index([shipmentId], map: "IX_StockMovements_ShipmentId")
+  @@map("StockMovements")
+}
+
+// ---------------------------------------------------------------------------
+// Payables ledger
+//
+// One append-only statement per party and currency. Balance is debit minus
+// credit, so a positive balance is money we still owe.
+// ---------------------------------------------------------------------------
+
+model LedgerAccount {
+  id           String  @id @default(cuid()) @db.NVarChar(30)
+  partyType    String  @db.NVarChar(30)
+  partyId      String  @db.NVarChar(30)
+  partyName    String  @db.NVarChar(180)
+  currencyCode String  @db.NVarChar(3)
+  debitTotal   Decimal @default(0) @db.Decimal(18, 4)
+  creditTotal  Decimal @default(0) @db.Decimal(18, 4)
+  balance      Decimal @default(0) @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now()) @db.DateTime2
+  updatedAt DateTime @updatedAt @db.DateTime2
+
+  entries LedgerEntry[]
+
+  @@unique([partyType, partyId, currencyCode], map: "UQ_LedgerAccounts_Party_Currency")
+  @@index([partyType], map: "IX_LedgerAccounts_PartyType")
+  @@map("LedgerAccounts")
+}
+
+model LedgerEntry {
+  id              String   @id @default(cuid()) @db.NVarChar(30)
+  ledgerAccountId String   @db.NVarChar(30)
+  entryDate       DateTime @db.DateTime2
+  entryType       String   @db.NVarChar(40)
+  referenceType   String   @db.NVarChar(40)
+  referenceId     String   @db.NVarChar(30)
+  referenceNo     String   @db.NVarChar(40)
+  narration       String   @db.NVarChar(400)
+  currencyCode    String   @db.NVarChar(3)
+  exchangeRate    Decimal  @default(1) @db.Decimal(18, 8)
+  debit           Decimal  @default(0) @db.Decimal(18, 4)
+  credit          Decimal  @default(0) @db.Decimal(18, 4)
+  balanceAfter    Decimal  @db.Decimal(18, 4)
+  baseDebit       Decimal  @default(0) @db.Decimal(18, 4)
+  baseCredit      Decimal  @default(0) @db.Decimal(18, 4)
+  shipmentId      String?  @db.NVarChar(30)
+  isReversal      Boolean  @default(false)
+  reversedEntryId String?  @db.NVarChar(30)
+
+  createdAt   DateTime @default(now()) @db.DateTime2
+  createdById String?  @db.NVarChar(30)
+
+  account LedgerAccount @relation(fields: [ledgerAccountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([ledgerAccountId, entryDate], map: "IX_LedgerEntries_Account_Date")
+  @@index([referenceType, referenceId], map: "IX_LedgerEntries_Reference")
+  @@index([shipmentId], map: "IX_LedgerEntries_ShipmentId")
+  @@map("LedgerEntries")
+}
+
+model CompanyProfile {
+  id             String  @id @default(cuid()) @db.NVarChar(30)
+  legalName      String  @db.NVarChar(180)
+  tradingName    String? @db.NVarChar(180)
+  taxNumber      String? @db.NVarChar(60)
+  registrationNo String? @db.NVarChar(60)
+  email          String? @db.NVarChar(180)
+  phone          String? @db.NVarChar(40)
+  website        String? @db.NVarChar(180)
+  addressLine1   String? @db.NVarChar(200)
+  addressLine2   String? @db.NVarChar(200)
+  city           String? @db.NVarChar(80)
+  country        String? @db.NVarChar(80)
+  baseCurrency   String  @default("PKR") @db.NVarChar(3)
+  logoKey        String? @db.NVarChar(400)
+
+  createdAt   DateTime @default(now()) @db.DateTime2
+  updatedAt   DateTime @updatedAt @db.DateTime2
+  updatedById String?  @db.NVarChar(30)
+
+  @@map("CompanyProfile")
+}
